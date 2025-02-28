@@ -1,0 +1,44 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Базовая тема приложения с Material Design -->
+    <style name="Theme.ArdMoney" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Настройки темы -->
+        <item name="colorPrimary">#465e3c</item>
+        <item name="colorPrimaryVariant">#23381f</item>
+        <item name="colorOnPrimary">#ffffff</item>
+        <item name="colorSecondary">#648459</item>
+        <item name="colorSecondaryVariant">#465e3c</item>
+        <item name="colorOnSecondary">#000000</item>
+        <item name="colorError">#B00020</item>
+        <item name="colorOnError">#ffffff</item>
+        <item name="android:colorBackground">#ffffff</item>
+        <item name="colorOnBackground">#ffffff</item>
+        <item name="colorSurface">#ffffff</item>
+        <item name="colorOnSurface">#ffffff</item>
+        <item name="android:statusBarColor" tools:targetApi="l">#465e3c</item>
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
+        <item name="bottomNavigationStyle">@style/Widget.MaterialComponents.BottomNavigationView.Custom</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+    </style>
+
+    <color name="green_500">#465e3c</color>
+    <color name="green_700">#23381f</color>
+    <color name="green_300">#648459</color>
+
+    <!-- Кастомный стиль для BottomNavigationView -->
+    <style name="Widget.MaterialComponents.BottomNavigationView.Custom" parent="Widget.MaterialComponents.BottomNavigationView">
+        <item name="backgroundTint">#465e3c</item>
+        <item name="itemIconTint">@drawable/bottom_nav_selector</item>
+        <item name="itemTextColor">@drawable/bottom_nav_text_selector</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.MaterialComponents.SmallComponent</item>
+    </style>
+
+    <!-- Кастомная форма для BottomNavigationView -->
+    <style name="ShapeAppearance.MaterialComponents.SmallComponent" parent="ShapeAppearance.MaterialComponents.SmallComponent" tools:ignore="ResourceCycle">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">4dp</item>
+        <item name="cornerSizeTopRight">4dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+</resources>

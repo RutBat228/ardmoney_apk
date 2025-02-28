@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">ArdMoney</string>
+    <string name="search">Поиск</string>
+    <string name="add">Добавить</string>
+    <string name="profile">Профиль</string>
+    <string name="navigard">Navigard</string>
+    <string name="home">Главная</string>
+    <string name="no_internet_message">Пездец, сломалось((</string>
+
+    <!-- Строки для системы обновлений -->
+    <string name="update_available">Доступно обновление</string>
+    <string name="update_message">Новая версия (%1$s) доступна. Хотите обновить?</string>
+    <string name="update_button">Обновить</string>
+    <string name="later_button">Позже</string>
+
+</resources>

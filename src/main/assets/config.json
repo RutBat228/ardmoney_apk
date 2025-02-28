@@ -1,0 +1,6 @@
+{
+    "webview_url": "https://ardmoney.ru",
+    "fcm_enabled": true,
+    "splash_screen_enabled": true,
+    "check_version_url": "https://ardmoney.ru/api/check_version.php"
+}
