@@ -7,11 +7,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
-
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Устаревшие разрешения для Android 9 и ниже -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29" />
+        android:maxSdkVersion="29"
+        tools:replace="android:maxSdkVersion"/>
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -41,7 +42,7 @@
         tools:ignore="DiscouragedApi"
         tools:targetApi="tiramisu">
 
-        <!-- Остальная часть манифеста остаётся без изменений -->
+        <!-- Активности -->
         <activity
             android:name=".core.UpdateInfoActivity"
             android:theme="@style/Theme.ArdMoney"
@@ -72,6 +73,8 @@
                 <data android:pathPrefix="/" />
             </intent-filter>
         </activity>
+
+        <!-- Сервис FCM -->
         <service
             android:name=".fcm.FCMService"
             android:exported="false">
@@ -79,6 +82,28 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- FileProvider для установки APK -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.rutbat.ardmoney.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+        <!-- FileProvider -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.rutbat.ardmoney.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+        <!-- Метаданные Firebase -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
