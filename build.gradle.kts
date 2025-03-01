@@ -25,7 +25,7 @@ android {
             isEnable = true
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true // Создаст универсальный APK с поддержкой всех архитектур
+            isUniversalApk = true
         }
     }
 
@@ -58,15 +58,18 @@ dependencies {
     implementation("androidx.cardview:cardview:1.0.0")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation ("com.android.volley:volley:1.2.1")
-    // Добавляем Shimmer вместо Lottie
-    implementation (libs.shimmer)
+    implementation("com.android.volley:volley:1.2.1")
+    implementation(libs.shimmer)
+    implementation("androidx.activity:activity-ktx:1.10.1") {
+        version {
+            strictly("1.10.1") // Принудительно фиксируем версию
+        }
+    }
 
-    // Уточнение зависимостей с префиксом libs (если используется libs.versions.toml)
     implementation(libs.androidx.monitor)
     implementation(libs.androidx.junit.ktx)
     implementation(libs.firebase.inappmessaging.display)
     implementation(libs.androidx.lifecycle.process)
-    implementation(libs.androidx.activity)
+
     androidTestImplementation(libs.junit.junit)
 }
