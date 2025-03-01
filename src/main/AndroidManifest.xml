@@ -2,24 +2,29 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     package="com.rutbat.ardmoney">
+
     <!-- Разрешения -->
-    <uses-permission android:name="android.permission.INTERNET" /> <!-- Необходим для проверки обновлений -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" /> <!-- Уже не требуется READ_MEDIA_IMAGES. Достаточно разрешения READ_MEDIA_VISUAL_USER_SELECTED -->
-    <uses-permission
-        android:name="android.permission.READ_MEDIA_IMAGES"
-        tools:ignore="SelectedPhotoAccess" />
-    <uses-permission
-        android:name="android.permission.READ_MEDIA_VIDEO"
-        tools:ignore="SelectedPhotoAccess" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Устаревшие разрешения для Android 9 и ниже -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Разрешения для работы с медиафайлами в Android 13+ -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <!-- Доступ к выбранным фото/видео для Android 14+ -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".ArdMoneyApp"
@@ -32,61 +37,59 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:screenOrientation="portrait"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ArdMoney">
+        android:theme="@style/Theme.ArdMoney"
+        tools:ignore="DiscouragedApi"
+        tools:targetApi="tiramisu">
 
+        <!-- Остальная часть манифеста остаётся без изменений -->
         <activity
             android:name=".core.UpdateInfoActivity"
             android:theme="@style/Theme.ArdMoney"
             android:exported="false" />
-        <!-- Сплеш-экран -->
         <activity
             android:name=".splashscreen.SplashActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity> <!-- Экран без интернета -->
+        </activity>
         <activity
             android:name=".core.NoInternetActivity"
             android:exported="false"
-            android:screenOrientation="portrait"
-            android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar" /> <!-- Главная активность с поддержкой глубоких ссылок -->
+            android:screenOrientation="fullSensor"
+            android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar" />
         <activity
             android:name=".core.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.ArdMoney">
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
                 <data android:scheme="https" />
                 <data android:host="ardmoney.ru" />
                 <data android:pathPrefix="/" />
             </intent-filter>
-        </activity> <!-- Сервис для обработки уведомлений через FCM -->
+        </activity>
         <service
             android:name=".fcm.FCMService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
-        </service> <!-- Объявление провайдера для Firebase -->
+        </service>
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
-            tools:node="merge" /> <!-- Поддержка аналитики и Crashlytics (если используется) -->
+            tools:node="merge" />
         <meta-data
             android:name="firebase_analytics_collection_enabled"
             android:value="true" />
         <meta-data
             android:name="firebase_crashlytics_collection_enabled"
             android:value="true" />
-
     </application>
 
 </manifest>

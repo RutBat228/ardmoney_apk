@@ -4,6 +4,6 @@
         <color android:color="#FFFFFF"/>
     </item>
     <item>
-        <bitmap android:src="@mipmap/splash"/>
+        <bitmap android:src="@drawable/splash"/>
     </item>
 </layer-list>

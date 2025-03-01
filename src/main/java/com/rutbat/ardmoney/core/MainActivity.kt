@@ -28,6 +28,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -71,13 +72,25 @@ class MainActivity : AppCompatActivity() {
             fileUploadCallback = null
         }
 
+    private val pickMediaLauncher =
+        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) {
+                fileUploadCallback?.onReceiveValue(arrayOf(uri))
+            } else {
+                fileUploadCallback?.onReceiveValue(null)
+            }
+            fileUploadCallback = null
+        }
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
             val allGranted = permissions.all { it.value }
             if (allGranted) {
+                Log.d(TAG, "All permissions granted, opening file chooser")
                 openFileChooser()
             } else {
-                Log.e(TAG, "Required permissions denied, cannot open file chooser")
+                val deniedPermissions = permissions.filter { !it.value }.keys.joinToString(", ")
+                Log.e(TAG, "Permissions denied: $deniedPermissions, cannot open file chooser")
                 fileUploadCallback?.onReceiveValue(null)
                 fileUploadCallback = null
             }
@@ -570,24 +583,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsAndOpenFileChooser() {
-        val permissions = arrayOf(
-            Manifest.permission.READ_MEDIA_IMAGES,
-            Manifest.permission.READ_MEDIA_VIDEO,
-            Manifest.permission.READ_MEDIA_AUDIO,
-            Manifest.permission.CAMERA
-        )
-        val permissionsToRequest = permissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }.toTypedArray()
-
-        if (permissionsToRequest.isNotEmpty()) {
-            permissionLauncher.launch(permissionsToRequest)
-        } else {
-            openFileChooser()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14+
+            Log.d(TAG, "Android 14+: Using PickVisualMedia for file selection")
+            openMediaPicker()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 13
+            val permissions = arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_AUDIO
+            )
+            val permissionsToRequest = permissions.filter {
+                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }.toTypedArray()
+            if (permissionsToRequest.isNotEmpty()) {
+                Log.d(TAG, "Requesting permissions for Android 13: ${permissionsToRequest.joinToString()}")
+                permissionLauncher.launch(permissionsToRequest)
+            } else {
+                Log.d(TAG, "All permissions already granted for Android 13, opening file chooser")
+                openFileChooser()
+            }
+        } else { // Android 9 and below
+            val permission = Manifest.permission.READ_EXTERNAL_STORAGE
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "Requesting READ_EXTERNAL_STORAGE for Android 9")
+                permissionLauncher.launch(arrayOf(permission))
+            } else {
+                Log.d(TAG, "READ_EXTERNAL_STORAGE already granted for Android 9, opening file chooser")
+                openFileChooser()
+            }
         }
     }
 
+    private fun openMediaPicker() {
+        Log.d(TAG, "Opening media picker for Android 14+")
+        pickMediaLauncher.launch(
+            PickVisualMediaRequest.Builder()
+            .setMediaType(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+            .build())
+    }
+
     private fun openFileChooser() {
+        Log.d(TAG, "Opening file chooser for Android 13 and below")
         val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
