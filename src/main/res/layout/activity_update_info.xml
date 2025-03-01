@@ -27,15 +27,6 @@
             android:backgroundTint="#434f3a"
             android:textColor="#FFFFFF" />
 
-        <Button
-            android:id="@+id/button_refresh"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Обновить"
-            android:layout_marginStart="10dp"
-            android:backgroundTint="#434f3a"
-            android:textColor="#FFFFFF" />
     </LinearLayout>
 
     <ProgressBar

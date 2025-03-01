@@ -20,7 +20,6 @@ class UpdateInfoActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
     private lateinit var backButton: Button
-    private lateinit var refreshButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,7 +35,6 @@ class UpdateInfoActivity : AppCompatActivity() {
         webView = findViewById(R.id.update_webview)
         progressBar = findViewById(R.id.update_progress_bar)
         backButton = findViewById(R.id.button_back)
-        refreshButton = findViewById(R.id.button_refresh)
 
         val url = intent.getStringExtra("update_url") ?: "https://ardmoney.ru/api/update_info.php"
 
@@ -70,31 +68,30 @@ class UpdateInfoActivity : AppCompatActivity() {
 
         webView.loadUrl(url)
 
-        // Кнопка "Назад" возвращает на главную страницу
+        // Кнопка "Назад" перенаправляет на главную страницу
         backButton.setOnClickListener {
-            val intent = Intent(this, MainActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            val intent = Intent(this, MainActivity::class.java).apply {
+                putExtra("targetUrl", "https://ardmoney.ru")
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
             startActivity(intent)
             finish()
-        }
-
-        refreshButton.setOnClickListener {
-            webView.reload()
-            updateButtonStates()
         }
 
         updateButtonStates()
     }
 
     private fun updateButtonStates() {
-        // Кнопка "Назад" всегда активна, так как ведёт на главную страницу
+        // Кнопка "Назад" всегда активна
         backButton.isEnabled = true
     }
 
     override fun onBackPressed() {
-        // Системная кнопка "Назад" также возвращает на главную страницу
-        val intent = Intent(this, MainActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        // Системная кнопка "Назад" также перенаправляет на главную страницу
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("targetUrl", "https://ardmoney.ru")
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
         startActivity(intent)
         finish()
     }

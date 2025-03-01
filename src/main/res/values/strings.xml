@@ -12,5 +12,7 @@
     <string name="update_message">Новая версия (%1$s) доступна. Хотите обновить?</string>
     <string name="update_button">Обновить</string>
     <string name="later_button">Позже</string>
+    <string name="exit_text">Действительно выйти?</string>
+    <string name="exit_button">Выход</string>
 
 </resources>

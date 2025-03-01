@@ -3,6 +3,7 @@ package com.rutbat.ardmoney.core
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.ConnectivityManager
@@ -15,6 +16,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -59,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
     private var isUpdatingNavigation = false
     private var isSwipeRefreshAllowed = true
+    private lateinit var prefsListener: SharedPreferences.OnSharedPreferenceChangeListener
 
     private val filePickerLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -119,8 +122,19 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         loadingOverlay = findViewById(R.id.loadingOverlay)
         bottomNavigationView = findViewById(R.id.bottomNavigationView)
+
         setupWebView()
+        updateNavigationVisibility() // Начальная проверка
         setupBottomNavigation()
+
+        // Инициализация слушателя SharedPreferences
+        val sharedPref = getSharedPreferences("user_prefs", MODE_PRIVATE)
+        prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "user_login") {
+                updateNavigationVisibility()
+            }
+        }
+        sharedPref.registerOnSharedPreferenceChangeListener(prefsListener)
 
         handleDeepLink(intent)
 
@@ -163,6 +177,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         checkForUpdates()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        getSharedPreferences("user_prefs", MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(prefsListener)
+        webView.destroy()
+    }
+
+    private fun updateNavigationVisibility() {
+        val sharedPref = getSharedPreferences("user_prefs", MODE_PRIVATE)
+        val userLoginFromPrefs = sharedPref.getString("user_login", null)
+        val cookieManager = CookieManager.getInstance()
+        val cookies = cookieManager.getCookie("https://ardmoney.ru") // Укажите ваш домен
+        val userFromCookie = cookies?.let {
+            val cookieMap = it.split(";").map { cookie ->
+                cookie.trim().split("=").let { it[0] to it.getOrNull(1) }
+            }.toMap()
+            cookieMap["user"]
+        }
+        val isLoggedIn = userLoginFromPrefs != null || userFromCookie != null
+        Log.d(TAG, "Checking navigation visibility: userLoginFromPrefs = $userLoginFromPrefs, userFromCookie = $userFromCookie, isLoggedIn = $isLoggedIn")
+        bottomNavigationView.visibility = if (isLoggedIn) View.VISIBLE else View.GONE
+        bottomNavigationView.invalidate()
     }
 
     private fun checkForUpdates() {
@@ -330,11 +368,6 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        webView.destroy()
-    }
-
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         webView.saveState(outState)
@@ -347,6 +380,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        updateNavigationVisibility() // Обновляем видимость при возвращении в активность
         if (!isNetworkAvailable()) {
             val intent = Intent(this, NoInternetActivity::class.java).apply {
                 putExtra(
@@ -429,14 +463,20 @@ class MainActivity : AppCompatActivity() {
             fun setUserLogin(login: String) {
                 val sharedPref = getSharedPreferences("user_prefs", MODE_PRIVATE)
                 val currentLogin = sharedPref.getString("user_login", null)
-                if (currentLogin != login) saveUserLogin(login)
+                Log.d(TAG, "setUserLogin called: new login = $login, current login = $currentLogin")
+                if (currentLogin != login) {
+                    saveUserLogin(login)
+                    updateNavigationVisibility()
+                }
             }
 
             @JavascriptInterface
             fun clearUserLogin() {
+                Log.d(TAG, "clearUserLogin called")
                 getSharedPreferences("user_prefs", MODE_PRIVATE).edit()
                     .remove("user_login")
                     .apply()
+                updateNavigationVisibility()
             }
 
             @JavascriptInterface
@@ -498,6 +538,7 @@ class MainActivity : AppCompatActivity() {
                     swipeRefreshLayout.isEnabled = !webView.canScrollVertically(-1)
                 }
                 updateNavigationState(url)
+                updateNavigationVisibility() // Проверяем куки после загрузки
             }
 
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
@@ -553,10 +594,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveUserLogin(login: String) {
+        Log.d(TAG, "Saving user login: $login")
         getSharedPreferences("user_prefs", MODE_PRIVATE).edit()
             .putString("user_login", login)
             .apply()
-
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (task.isSuccessful) sendTokenToServer(login, task.result)
             else Log.e(TAG, "Ошибка получения FCM-токена", task.exception)
@@ -618,8 +659,9 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "Opening media picker for Android 14+")
         pickMediaLauncher.launch(
             PickVisualMediaRequest.Builder()
-            .setMediaType(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-            .build())
+                .setMediaType(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                .build()
+        )
     }
 
     private fun openFileChooser() {
@@ -632,11 +674,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showExitDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Выход")
-            .setMessage("Вы уверены, что хотите выйти?")
-            .setPositiveButton("Да") { _, _ -> finish() }
-            .setNegativeButton("Нет", null)
-            .show()
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_exit, null)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(false) // Запрещаем закрытие по кнопке "Назад"
+            .create()
+
+        val exitButton = dialogView.findViewById<Button>(R.id.exitButton)
+
+        exitButton.setOnClickListener {
+            Log.d(TAG, "Exit button clicked")
+            finish()
+            dialog.dismiss()
+        }
+
+        dialog.setCanceledOnTouchOutside(true) // Разрешаем закрытие при клике вне диалога
+        dialog.show()
+        dialog.window?.apply {
+            setLayout(
+                (resources.displayMetrics.widthPixels * 0.85).toInt(),
+                WindowManager.LayoutParams.WRAP_CONTENT
+            )
+            setBackgroundDrawableResource(android.R.color.transparent)
+        }
     }
 }
