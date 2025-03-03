@@ -1,16 +1,14 @@
 package com.rutbat.ardmoney.core
 
 import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -20,7 +18,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import com.rutbat.ardmoney.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class UpdateInfoActivity : AppCompatActivity() {
@@ -50,27 +53,41 @@ class UpdateInfoActivity : AppCompatActivity() {
 
         val url = intent.getStringExtra("update_url") ?: "https://ardmoney.ru/api/update_info.php"
 
+        setupWebView(url)
+        setupBackButton()
+    }
+
+    private fun setupWebView(url: String) {
         with(webView.settings) {
             javaScriptEnabled = true
             domStorageEnabled = true
-            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
 
         webView.webViewClient = object : WebViewClient() {
-            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+            override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 progressBar.visibility = View.VISIBLE
                 updateButtonStates()
                 Log.d(TAG, "Page started loading: $url")
             }
 
-            override fun onPageFinished(view: WebView?, url: String?) {
+            override fun onPageFinished(view: WebView, url: String?) {
                 progressBar.visibility = View.GONE
                 updateButtonStates()
                 Log.d(TAG, "Page finished loading: $url")
             }
 
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val url = request?.url.toString() ?: return false
+            @Suppress("OVERRIDE_DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                if (url.endsWith(".apk")) {
+                    downloadApk(url)
+                    return true
+                }
+                return false
+            }
+
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val url = request.url.toString()
                 if (url.endsWith(".apk")) {
                     downloadApk(url)
                     return true
@@ -80,24 +97,16 @@ class UpdateInfoActivity : AppCompatActivity() {
         }
 
         webView.loadUrl(url)
+    }
 
+    private fun setupBackButton() {
         backButton.setOnClickListener {
-            val intent = Intent(this, MainActivity::class.java).apply {
-                putExtra("targetUrl", "https://ardmoney.ru")
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-            startActivity(intent)
-            finish()
+            navigateToMainActivity()
         }
-
-        updateButtonStates()
-
-        val downloadIntentFilter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        registerReceiver(downloadReceiver, downloadIntentFilter, Context.RECEIVER_EXPORTED)
     }
 
     private fun downloadApk(url: String) {
-        val downloadManager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        val downloadManager = getSystemService(DownloadManager::class.java)
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle("Downloading APK")
             .setDescription("Downloading update for ArdMoney")
@@ -108,73 +117,74 @@ class UpdateInfoActivity : AppCompatActivity() {
 
         downloadId = downloadManager.enqueue(request)
         Log.d(TAG, "Started downloading APK from $url with ID: $downloadId")
+
+        monitorDownload(downloadId)
     }
 
-    private val downloadReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-            Log.d(TAG, "Received broadcast for download ID: $id, expected: $downloadId")
-            if (id == downloadId) {
-                handleDownloadCompletion(id)
-            }
-        }
-    }
-
-    private fun handleDownloadCompletion(id: Long) {
-        if (isInstalling) return
-        val downloadManager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-        val query = DownloadManager.Query().setFilterById(id)
-        downloadManager.query(query).use { cursor ->
-            if (cursor.moveToFirst()) {
-                val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                    val localUriIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)
-                    val uriString = cursor.getString(localUriIndex)
-                    val uri = Uri.parse(uriString)
-                    val apkFile = File(uri.path!!)
-                    Log.d(TAG, "Download completed via receiver, APK path: ${apkFile.absolutePath}")
-                    installApk(apkFile)
-                } else {
-                    val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
-                    Log.e(TAG, "Download failed with status: $status, reason: $reason")
+    private fun monitorDownload(id: Long) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val downloadManager = getSystemService(DownloadManager::class.java)
+            var isCompleted = false
+            while (!isCompleted) {
+                val query = DownloadManager.Query().setFilterById(id)
+                downloadManager.query(query).use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                        when (status) {
+                            DownloadManager.STATUS_SUCCESSFUL -> {
+                                val uriString = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
+                                val uri = Uri.parse(uriString)
+                                val apkFile = File(requireNotNull(uri.path))
+                                withContext(Dispatchers.Main) {
+                                    installApk(apkFile)
+                                }
+                                isCompleted = true
+                            }
+                            DownloadManager.STATUS_FAILED -> {
+                                val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+                                Log.e(TAG, "Download failed with reason: $reason")
+                                isCompleted = true
+                            }
+                        }
+                    }
                 }
-            } else {
-                Log.e(TAG, "Download cursor is empty for ID: $id")
+                if (!isCompleted) {
+                    delay(1000)
+                }
             }
         }
     }
 
     private fun installApk(apkFile: File) {
-        if (apkFile.exists() && !isInstalling) {
-            Log.d(TAG, "APK file exists at: ${apkFile.absolutePath}, size: ${apkFile.length()} bytes")
-            isInstalling = true
-            val apkUri = FileProvider.getUriForFile(
-                this,
-                "com.rutbat.ardmoney.fileprovider",
-                apkFile
-            )
-            val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
-                setDataAndType(apkUri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    flags = flags or Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-            }
-            try {
-                startActivity(intent)
-                Log.d(TAG, "APK installation intent started")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start APK installation: ${e.message}", e)
-                isInstalling = false
-            }
-        } else {
+        if (!apkFile.exists() || isInstalling) {
             Log.e(TAG, "APK file does not exist at: ${apkFile.absolutePath} or installation already in progress")
+            return
+        }
+
+        Log.d(TAG, "APK file exists at: ${apkFile.absolutePath}, size: ${apkFile.length()} bytes")
+        isInstalling = true
+        val apkUri = FileProvider.getUriForFile(
+            this,
+            "com.rutbat.ardmoney.fileprovider",
+            apkFile
+        )
+        val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(intent)
+            Log.d(TAG, "APK installation intent started")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start APK installation: ${e.message}", e)
+            isInstalling = false
         }
     }
 
+    @Deprecated("Deprecated in API 33, replaced with ActivityResult API")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        isInstalling = false // Сбрасываем флаг после завершения установки
+        isInstalling = false
         if (resultCode == RESULT_OK) {
             Log.d(TAG, "APK installation completed successfully")
             finish()
@@ -184,25 +194,26 @@ class UpdateInfoActivity : AppCompatActivity() {
     }
 
     private fun updateButtonStates() {
-        backButton.isEnabled = true
+        backButton.isEnabled = progressBar.visibility == View.GONE
     }
 
-    override fun onBackPressed() {
+    private fun navigateToMainActivity() {
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("targetUrl", "https://ardmoney.ru")
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
         startActivity(intent)
         finish()
     }
 
+    @Deprecated("Deprecated in API 30, use OnBackPressedDispatcher")
+    override fun onBackPressed() {
+        super.onBackPressed()
+        navigateToMainActivity()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        try {
-            unregisterReceiver(downloadReceiver)
-        } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Receiver not registered: ${e.message}")
-        }
         webView.destroy()
     }
 }

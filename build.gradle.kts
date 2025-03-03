@@ -1,6 +1,6 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    id("org.jetbrains.kotlin.android")
     id("com.google.gms.google-services")
 }
 
@@ -13,10 +13,10 @@ android {
         minSdk = 28
         targetSdk = 34
         versionCode = 2
-        versionName = "2.4.1"
+        versionName = "2.4.2"
 
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
     }
 
@@ -30,7 +30,7 @@ android {
     }
 
     buildTypes {
-        getByName("release") {
+        release {
             isMinifyEnabled = true // Включаем обфускацию
             isShrinkResources = true // Уменьшаем ресурсы
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -45,6 +45,9 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+
+    // Опционально: Временно отключить полный режим R8 для отладки
+    // Если проблема сохраняется, добавьте в gradle.properties: android.enableR8.fullMode=false
 }
 
 dependencies {
@@ -62,11 +65,7 @@ dependencies {
     implementation("com.android.volley:volley:1.2.1")
     implementation(libs.shimmer)
 
-    implementation("androidx.activity:activity-ktx:1.10.1") {
-        version {
-            strictly("1.10.1")
-        }
-    }
+    implementation("androidx.activity:activity-ktx:1.10.1")
 
     implementation(libs.androidx.monitor)
     implementation(libs.androidx.junit.ktx)

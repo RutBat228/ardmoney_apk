@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
@@ -30,13 +31,15 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.PackageManagerCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.android.volley.Request
 import com.android.volley.toolbox.JsonObjectRequest
@@ -45,10 +48,13 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.firebase.messaging.FirebaseMessaging
 import com.rutbat.ardmoney.R
 import com.rutbat.ardmoney.config.AppConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 class MainActivity : AppCompatActivity() {
 
@@ -62,49 +68,28 @@ class MainActivity : AppCompatActivity() {
     private var isUpdatingNavigation = false
     private var isSwipeRefreshAllowed = true
     private lateinit var prefsListener: SharedPreferences.OnSharedPreferenceChangeListener
+    private lateinit var connectivityManager: ConnectivityManager
+    private lateinit var networkCallback: ConnectivityManager.NetworkCallback
 
-    private val filePickerLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == RESULT_OK) {
-                val data: Intent? = result.data
-                val uri = data?.data
-                fileUploadCallback?.onReceiveValue(if (uri != null) arrayOf(uri) else null)
-            } else {
-                fileUploadCallback?.onReceiveValue(null)
-            }
+    private val pickMediaLauncher = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        fileUploadCallback?.onReceiveValue(uri?.let { arrayOf(it) } ?: null)
+        fileUploadCallback = null
+    }
+
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        if (permissions.all { it.value }) {
+            openMediaPicker()
+        } else {
+            fileUploadCallback?.onReceiveValue(null)
             fileUploadCallback = null
         }
+    }
 
-    private val pickMediaLauncher =
-        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-            if (uri != null) {
-                fileUploadCallback?.onReceiveValue(arrayOf(uri))
-            } else {
-                fileUploadCallback?.onReceiveValue(null)
-            }
-            fileUploadCallback = null
+    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (!isGranted) {
+            Log.w(TAG, "Notification permission denied")
         }
-
-    private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            val allGranted = permissions.all { it.value }
-            if (allGranted) {
-                Log.d(TAG, "All permissions granted, opening file chooser")
-                openFileChooser()
-            } else {
-                val deniedPermissions = permissions.filter { !it.value }.keys.joinToString(", ")
-                Log.e(TAG, "Permissions denied: $deniedPermissions, cannot open file chooser")
-                fileUploadCallback?.onReceiveValue(null)
-                fileUploadCallback = null
-            }
-        }
-
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-            if (!isGranted) {
-                Log.w(TAG, "Notification permission denied")
-            }
-        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -123,6 +108,7 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         loadingOverlay = findViewById(R.id.loadingOverlay)
         bottomNavigationView = findViewById(R.id.bottomNavigationView)
+        connectivityManager = getSystemService(ConnectivityManager::class.java)
 
         setupWebView()
         updateNavigationVisibility()
@@ -131,7 +117,7 @@ class MainActivity : AppCompatActivity() {
         val sharedPref = getSharedPreferences("user_prefs", MODE_PRIVATE)
         prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == "user_login") {
-                updateNavigationVisibility()
+                runOnUiThread { updateNavigationVisibility() }
             }
         }
         sharedPref.registerOnSharedPreferenceChangeListener(prefsListener)
@@ -144,7 +130,6 @@ class MainActivity : AppCompatActivity() {
             } else {
                 swipeRefreshLayout.isRefreshing = false
                 showNoInternetScreen()
-                Log.w(TAG, "Нет интернет-соединения при обновлении")
             }
         }
 
@@ -152,8 +137,7 @@ class MainActivity : AppCompatActivity() {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     if (isSwipeRefreshAllowed) {
-                        val canScrollUp = webView.canScrollVertically(-1)
-                        swipeRefreshLayout.isEnabled = !canScrollUp
+                        swipeRefreshLayout.isEnabled = !webView.canScrollVertically(-1)
                     }
                 }
             }
@@ -176,6 +160,7 @@ class MainActivity : AppCompatActivity() {
             checkInternetAndLoad(intent)
         }
 
+        setupNetworkCallback()
         checkForUpdates()
     }
 
@@ -183,7 +168,25 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         getSharedPreferences("user_prefs", MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
+        connectivityManager.unregisterNetworkCallback(networkCallback)
         webView.destroy()
+    }
+
+    private fun setupNetworkCallback() {
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread {
+                    checkInternetAndLoad(intent)
+                }
+            }
+
+            override fun onLost(network: Network) {
+                runOnUiThread {
+                    showNoInternetScreen()
+                }
+            }
+        }
+        connectivityManager.registerDefaultNetworkCallback(networkCallback)
     }
 
     private fun updateNavigationVisibility() {
@@ -191,33 +194,26 @@ class MainActivity : AppCompatActivity() {
         val userLoginFromPrefs = sharedPref.getString("user_login", null)
         val cookieManager = CookieManager.getInstance()
         val cookies = cookieManager.getCookie(AppConfig.WEBVIEW_URL)
-        val userFromCookie = cookies?.let {
-            val cookieMap = it.split(";").map { cookie ->
-                cookie.trim().split("=").let { it[0] to it.getOrNull(1) }
-            }.toMap()
-            cookieMap["user"]
-        }
+        val userFromCookie = cookies?.split(";")?.map { it.trim().split("=") }
+            ?.associate { it[0] to it.getOrNull(1) }?.get("user")
         val isLoggedIn = userLoginFromPrefs != null || userFromCookie != null
-        Log.d(TAG, "Checking navigation visibility: userLoginFromPrefs = $userLoginFromPrefs, userFromCookie = $userFromCookie, isLoggedIn = $isLoggedIn")
         bottomNavigationView.visibility = if (isLoggedIn) View.VISIBLE else View.GONE
-        bottomNavigationView.invalidate()
     }
 
     private fun checkForUpdates() {
-        Log.d(TAG, "Начало проверки обновлений")
-        if (!isNetworkAvailable()) {
-            Log.w(TAG, "Нет интернет-соединения, пропускаем проверку обновлений")
-            return
-        }
+        if (!isNetworkAvailable()) return
 
         val queue = Volley.newRequestQueue(this)
         val url = AppConfig.CHECK_VERSION_URL
-        Log.d(TAG, "URL для проверки обновлений: $url")
-
         val versionName = try {
-            packageManager.getPackageInfo(packageName, 0).versionName
-        } catch (e: Exception) {
-            Log.e(TAG, "Не удалось получить версию приложения: ${e.message}", e)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // API 33+
+                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0)).versionName
+            } else { // API < 33
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }
+        } catch (e: PackageManager.NameNotFoundException) {
+            Log.e(TAG, "Failed to get package info: ${e.message}")
             return
         }
 
@@ -227,22 +223,19 @@ class MainActivity : AppCompatActivity() {
 
         val request = object : JsonObjectRequest(Request.Method.POST, url, jsonBody,
             { response ->
-                Log.d(TAG, "Получен ответ от сервера: $response")
-                try {
-                    val updateNeeded = response.getBoolean("updateNeeded")
-                    if (updateNeeded) {
-                        val newVersion = response.getString("newVersion")
-                        val downloadUrl = response.getString("downloadUrl")
+                val updateNeeded = response.optBoolean("updateNeeded", false)
+                if (updateNeeded) {
+                    val newVersion = response.optString("newVersion", "")
+                    val downloadUrl = response.optString("downloadUrl", "")
+                    if (newVersion.isNotEmpty() && downloadUrl.isNotEmpty()) {
                         if (versionName != null) {
                             showUpdateDialog(versionName, newVersion, downloadUrl)
                         }
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Ошибка разбора ответа сервера: ${e.message}", e)
                 }
             },
             { error ->
-                Log.e(TAG, "Ошибка при проверке обновлений: ${error.message}", error)
+                Log.e(TAG, "Update check error: ${error.message}")
             }) {
             override fun getHeaders(): Map<String, String> {
                 return mapOf("Content-Type" to "application/json")
@@ -252,9 +245,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showUpdateDialog(currentVersion: String, newVersion: String, downloadUrl: String) {
-        val updateInfoUrl = "${AppConfig.WEBVIEW_URL}/api/update_info.php?version=${URLEncoder.encode(currentVersion, "UTF-8")}"
-        Log.d(TAG, "URL для диалога обновления: $updateInfoUrl")
-
+        val updateInfoUrl = "${AppConfig.WEBVIEW_URL}/api/update_info.php?version=${URLEncoder.encode(currentVersion, StandardCharsets.UTF_8.name())}"
         val dialogView = LayoutInflater.from(this).inflate(R.layout.custom_update_dialog, null)
         val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
@@ -265,32 +256,20 @@ class MainActivity : AppCompatActivity() {
         dialogView.findViewById<TextView>(R.id.update_message).text = getString(R.string.update_message, newVersion)
 
         dialogView.findViewById<Button>(R.id.update_button).setOnClickListener {
-            Log.d(TAG, "Пользователь нажал 'Обновить', открываем UpdateInfoActivity с URL: $updateInfoUrl")
-            val intent = Intent(this, UpdateInfoActivity::class.java).apply {
-                putExtra("update_url", updateInfoUrl)
-            }
-            startActivity(intent)
+            startActivity(Intent(this, UpdateInfoActivity::class.java).putExtra("update_url", updateInfoUrl))
             dialog.dismiss()
         }
 
         dialogView.findViewById<Button>(R.id.later_button).setOnClickListener {
-            Log.d(TAG, "Пользователь нажал 'Позже'")
             dialog.dismiss()
         }
 
         dialog.show()
-        dialog.window?.apply {
-            setLayout(
-                (resources.displayMetrics.widthPixels * 0.85).toInt(),
-                WindowManager.LayoutParams.WRAP_CONTENT
-            )
-            setBackgroundDrawableResource(android.R.color.transparent)
-            ViewCompat.setOnApplyWindowInsetsListener(decorView) { view, insets ->
-                val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-                view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-                insets
-            }
-        }
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.85).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -307,17 +286,15 @@ class MainActivity : AppCompatActivity() {
                 webView.loadUrl(url)
             } else {
                 showNoInternetScreen(url)
-                Log.w(TAG, "Нет интернет-соединения для глубокой ссылки: $url")
             }
         }
     }
 
     private fun setupBottomNavigation() {
-        bottomNavigationView.setOnNavigationItemSelectedListener { item ->
-            if (isUpdatingNavigation) return@setOnNavigationItemSelectedListener true
+        bottomNavigationView.setOnItemSelectedListener { item ->
+            if (isUpdatingNavigation) return@setOnItemSelectedListener true
 
-            val menuItemView = bottomNavigationView.findViewById<View>(item.itemId)
-            menuItemView?.let {
+            bottomNavigationView.findViewById<View>(item.itemId)?.let {
                 animateNavigationItem(it, item.itemId == R.id.nav_add)
             }
 
@@ -327,7 +304,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_add -> "${AppConfig.WEBVIEW_URL}/montaj.php"
                 R.id.nav_profile -> "${AppConfig.WEBVIEW_URL}/user.php"
                 R.id.nav_navigard -> "${AppConfig.WEBVIEW_URL}/navigard/"
-                else -> return@setOnNavigationItemSelectedListener false
+                else -> return@setOnItemSelectedListener false
             }
 
             if (isNetworkAvailable()) {
@@ -338,8 +315,6 @@ class MainActivity : AppCompatActivity() {
                 isUpdatingNavigation = false
             } else {
                 showNoInternetScreen(url)
-                Log.w(TAG, "Нет интернет-соединения для навигации: $url")
-                return@setOnNavigationItemSelectedListener true
             }
             true
         }
@@ -352,20 +327,13 @@ class MainActivity : AppCompatActivity() {
             .scaleY(scale)
             .setDuration(150L)
             .withEndAction {
-                view.animate()
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(100L)
-                    .start()
+                view.animate().scaleX(1f).scaleY(1f).setDuration(100L).start()
             }
             .start()
     }
 
-    private fun showNoInternetScreen(targetUrl: String? = null) {
-        val intent = Intent(this, NoInternetActivity::class.java).apply {
-            putExtra("targetUrl", targetUrl ?: webView.url)
-        }
-        startActivity(intent)
+    private fun showNoInternetScreen(targetUrl: String = AppConfig.WEBVIEW_URL) {
+        startActivity(Intent(this, NoInternetActivity::class.java).putExtra("targetUrl", targetUrl))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -382,11 +350,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         updateNavigationVisibility()
         if (!isNetworkAvailable()) {
-            val intent = Intent(this, NoInternetActivity::class.java).apply {
-                putExtra("targetUrl", webView.url ?: AppConfig.WEBVIEW_URL)
-            }
-            startActivity(intent)
-            Log.w(TAG, "Нет интернет-соединения при возобновлении")
+            showNoInternetScreen(webView.url ?: AppConfig.WEBVIEW_URL)
         }
     }
 
@@ -408,28 +372,23 @@ class MainActivity : AppCompatActivity() {
                 if (shouldCheck) checkForUpdates()
             }
         } else {
-            val noInternetIntent = Intent(this, NoInternetActivity::class.java).apply {
-                putExtra("targetUrl", webView.url ?: AppConfig.WEBVIEW_URL)
-            }
-            startActivity(noInternetIntent)
-            Log.w(TAG, "Нет интернет-соединения при запуске")
+            showNoInternetScreen(webView.url ?: AppConfig.WEBVIEW_URL)
         }
     }
 
     private fun isNetworkAvailable(): Boolean {
-        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        val network = connectivityManager.activeNetwork
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+        return capabilities != null && (
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                )
     }
 
     private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -437,7 +396,7 @@ class MainActivity : AppCompatActivity() {
         FirebaseMessaging.getInstance().subscribeToTopic("all")
             .addOnCompleteListener { task ->
                 if (!task.isSuccessful) {
-                    Log.e(TAG, "Не удалось подписаться на тему 'all'", task.exception)
+                    Log.e(TAG, "Failed to subscribe to topic 'all': ${task.exception?.message}")
                 }
             }
     }
@@ -448,18 +407,17 @@ class MainActivity : AppCompatActivity() {
             domStorageEnabled = true
             setSupportMultipleWindows(false)
             setSupportZoom(false)
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW // Разрешаем смешанный контент
-            cacheMode = WebSettings.LOAD_DEFAULT // Используем стандартный режим кэширования
-            databaseEnabled = true // Включаем поддержку баз данных
-            loadsImagesAutomatically = true // Автоматическая загрузка изображений
-            setGeolocationEnabled(false) // Включаем геолокацию, если требуется
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            cacheMode = WebSettings.LOAD_DEFAULT
+            loadsImagesAutomatically = true
+            setGeolocationEnabled(false)
         }
 
         webView.addJavascriptInterface(AndroidJsInterface(this), "AndroidInterface")
 
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val url = request?.url.toString() ?: return false
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val url = request.url.toString()
                 return if (!url.contains("ardmoney.ru")) {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                     true
@@ -468,18 +426,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                super.onPageStarted(view, url, favicon)
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 loadingOverlay.visibility = View.VISIBLE
                 progressBar.visibility = View.VISIBLE
-                Log.d(TAG, "Страница начала загружаться: $url")
             }
 
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
+            override fun onPageFinished(view: WebView, url: String?) {
                 loadingOverlay.visibility = View.GONE
                 progressBar.visibility = View.GONE
-                Log.d(TAG, "Страница завершила загрузку: $url")
                 if (swipeRefreshLayout.isRefreshing) swipeRefreshLayout.isRefreshing = false
                 if (url?.contains("ardmoney.ru/result.php") == true) {
                     isSwipeRefreshAllowed = false
@@ -492,16 +446,12 @@ class MainActivity : AppCompatActivity() {
                 updateNavigationVisibility()
             }
 
-            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                super.onReceivedError(view, request, error)
-                Log.e(TAG, "Ошибка WebView: ${error?.description}")
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                Log.e(TAG, "WebView error: ${error.description}")
                 loadingOverlay.visibility = View.GONE
                 progressBar.visibility = View.GONE
                 if (!isNetworkAvailable()) {
-                    val intent = Intent(this@MainActivity, NoInternetActivity::class.java).apply {
-                        putExtra("targetUrl", request?.url.toString())
-                    }
-                    startActivity(intent)
+                    showNoInternetScreen(request.url.toString())
                 }
             }
         }
@@ -545,83 +495,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveUserLogin(login: String) {
-        Log.d(TAG, "Saving user login: $login")
         getSharedPreferences("user_prefs", MODE_PRIVATE).edit()
             .putString("user_login", login)
             .apply()
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (task.isSuccessful) sendTokenToServer(login, task.result)
-            else Log.e(TAG, "Ошибка получения FCM-токена", task.exception)
         }
     }
 
     private fun sendTokenToServer(login: String, token: String) {
-        Thread {
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val url = URL("${AppConfig.WEBVIEW_URL}/api/set_token.php")
                 val connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.doOutput = true
-                val params = "login=${URLEncoder.encode(login, "UTF-8")}&token=${URLEncoder.encode(token, "UTF-8")}"
+                val params = "login=${URLEncoder.encode(login, StandardCharsets.UTF_8.name())}&token=${URLEncoder.encode(token, StandardCharsets.UTF_8.name())}"
                 connection.outputStream.use { os ->
-                    os.write(params.toByteArray(Charsets.UTF_8))
+                    os.write(params.toByteArray(StandardCharsets.UTF_8))
                 }
                 connection.inputStream.use { }
-                Log.d(TAG, "Токен успешно отправлен на сервер")
             } catch (e: Exception) {
-                Log.e(TAG, "Ошибка отправки токена на сервер", e)
+                Log.e(TAG, "Failed to send token to server: ${e.message}")
             }
-        }.start()
+        }
     }
 
     private fun checkPermissionsAndOpenFileChooser() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            Log.d(TAG, "Android 14+: Using PickVisualMedia for file selection")
-            openMediaPicker()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val permissions = arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                Manifest.permission.READ_MEDIA_AUDIO
-            )
-            val permissionsToRequest = permissions.filter { permission ->
-                ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
-            }.toTypedArray()
-            if (permissionsToRequest.isNotEmpty()) {
-                Log.d(TAG, "Requesting permissions for Android 13: ${permissionsToRequest.joinToString()}")
-                permissionLauncher.launch(permissionsToRequest)
-            } else {
-                Log.d(TAG, "All permissions already granted for Android 13, opening file chooser")
-                openFileChooser()
-            }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
+            permissionLauncher.launch(arrayOf(Manifest.permission.READ_MEDIA_IMAGES))
         } else {
-            val permission = Manifest.permission.READ_EXTERNAL_STORAGE
-            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-                Log.d(TAG, "Requesting READ_EXTERNAL_STORAGE for Android 9")
-                permissionLauncher.launch(arrayOf(permission))
-            } else {
-                Log.d(TAG, "READ_EXTERNAL_STORAGE already granted for Android 9, opening file chooser")
-                openFileChooser()
-            }
+            openMediaPicker()
         }
     }
 
     private fun openMediaPicker() {
-        Log.d(TAG, "Opening media picker for Android 14+")
-        pickMediaLauncher.launch(
-            PickVisualMediaRequest.Builder()
-                .setMediaType(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                .build()
-        )
-    }
-
-    private fun openFileChooser() {
-        Log.d(TAG, "Opening file chooser for Android 13 and below")
-        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-        }
-        filePickerLauncher.launch(intent)
+        pickMediaLauncher.launch(PickVisualMediaRequest.Builder()
+            .setMediaType(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+            .build())
     }
 
     private fun showExitDialog() {
@@ -631,32 +542,25 @@ class MainActivity : AppCompatActivity() {
             .setCancelable(false)
             .create()
 
-        val exitButton = dialogView.findViewById<Button>(R.id.exitButton)
-
-        exitButton.setOnClickListener {
-            Log.d(TAG, "Exit button clicked")
+        dialogView.findViewById<Button>(R.id.exitButton).setOnClickListener {
             finish()
             dialog.dismiss()
         }
 
         dialog.setCanceledOnTouchOutside(true)
         dialog.show()
-        dialog.window?.apply {
-            setLayout(
-                (resources.displayMetrics.widthPixels * 0.85).toInt(),
-                WindowManager.LayoutParams.WRAP_CONTENT
-            )
-            setBackgroundDrawableResource(android.R.color.transparent)
-        }
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.85).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
 
-    // Внутренний класс для JavaScript-интерфейса
     private class AndroidJsInterface(private val activity: MainActivity) {
         @JavascriptInterface
         fun setUserLogin(login: String) {
             val sharedPref = activity.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
             val currentLogin = sharedPref.getString("user_login", null)
-            Log.d(activity.TAG, "setUserLogin called: new login = $login, current login = $currentLogin")
             if (currentLogin != login) {
                 activity.saveUserLogin(login)
                 activity.updateNavigationVisibility()
@@ -665,7 +569,6 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun clearUserLogin() {
-            Log.d(activity.TAG, "clearUserLogin called")
             activity.getSharedPreferences("user_prefs", Context.MODE_PRIVATE).edit()
                 .remove("user_login")
                 .apply()
@@ -675,27 +578,27 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun disableSwipeRefresh() {
             activity.swipeRefreshLayout.isEnabled = false
-            Log.d(activity.TAG, "SwipeRefreshLayout отключен через JS интерфейс")
         }
 
         @JavascriptInterface
         fun enableSwipeRefresh() {
             activity.swipeRefreshLayout.isEnabled = true
-            Log.d(activity.TAG, "SwipeRefreshLayout включен через JS интерфейс")
         }
 
         @JavascriptInterface
         fun onNavigationItemSelected(itemId: String) {
-            when (itemId) {
-                "nav_home" -> activity.bottomNavigationView.selectedItemId = R.id.nav_home
-                "nav_search" -> activity.bottomNavigationView.selectedItemId = R.id.nav_search
-                "nav_add" -> activity.bottomNavigationView.selectedItemId = R.id.nav_add
-                "nav_profile" -> activity.bottomNavigationView.selectedItemId = R.id.nav_profile
-                "nav_navigard" -> activity.bottomNavigationView.selectedItemId = R.id.nav_navigard
+            val navId = when (itemId) {
+                "nav_home" -> R.id.nav_home
+                "nav_search" -> R.id.nav_search
+                "nav_add" -> R.id.nav_add
+                "nav_profile" -> R.id.nav_profile
+                "nav_navigard" -> R.id.nav_navigard
+                else -> return
             }
-            val selectedView = activity.bottomNavigationView.findViewById<View>(activity.bottomNavigationView.selectedItemId)
-            selectedView?.let { activity.animateNavigationItem(it, itemId == "nav_add") }
-            Log.d(activity.TAG, "Выбран элемент навигации: $itemId")
+            activity.bottomNavigationView.selectedItemId = navId
+            activity.bottomNavigationView.findViewById<View>(navId)?.let {
+                activity.animateNavigationItem(it, itemId == "nav_add")
+            }
         }
     }
 }

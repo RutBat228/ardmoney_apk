@@ -25,9 +25,29 @@
 -keep class androidx.** { *; }
 -keep class com.google.** { *; }
 
+# Сохраняем класс AnnotatedType и связанные с ним классы рефлексии
+-keep class java.lang.reflect.AnnotatedType { *; }
+-keep class java.lang.reflect.** { *; }
+
+# Сохраняем все классы Guava, связанные с рефлексией
+-keep class com.google.common.reflect.** { *; }
+-dontwarn com.google.common.reflect.**
+
+# Сохраняем аннотации и их использование
+-keepattributes *Annotation*
+-keepattributes Signature
+
 # Уменьшаем логирование в релизной сборке (опционально)
 -assumenosideeffects class android.util.Log {
     public static *** d(...);
     public static *** v(...);
     public static *** i(...);
 }
+
+# Дополнительные правила для Firebase и других библиотек (при необходимости)
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
+
+# Сохраняем классы, связанные с Kotlin и Coroutines
+-keep class kotlinx.coroutines.** { *; }
+-dontwarn kotlinx.coroutines.**

@@ -3,42 +3,29 @@ package com.rutbat.ardmoney.core
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
-import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.widget.VideoView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.rutbat.ardmoney.R
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class NoInternetActivity : AppCompatActivity() {
 
     private lateinit var videoView: VideoView
-    private val handler = Handler(Looper.getMainLooper())
     private val TAG = "NoInternetActivity"
-    private val checkInternetRunnable = object : Runnable {
-        override fun run() {
-            if (isNetworkAvailable()) {
-                val targetUrl = intent.getStringExtra("targetUrl")
-                val returnIntent = Intent(this@NoInternetActivity, MainActivity::class.java).apply {
-                    putExtra("targetUrl", targetUrl)
-                    putExtra("checkUpdate", true) // Сигнал для проверки обновлений
-                }
-                startActivity(returnIntent)
-                finish()
-            } else {
-                handler.postDelayed(this, 2000)
-            }
-        }
-    }
+    private lateinit var connectivityManager: ConnectivityManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_no_internet)
 
         videoView = findViewById(R.id.videoView)
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         // Установка пути к видео из папки raw
         val videoPath = "android.resource://${packageName}/${R.raw.cat}"
@@ -54,7 +41,6 @@ class NoInternetActivity : AppCompatActivity() {
             val scaleX = screenWidth.toFloat() / videoWidth.toFloat()
             val scaleY = screenHeight.toFloat() / videoHeight.toFloat()
 
-            // Устанавливаем масштаб, чтобы видео заполнило весь экран
             videoView.scaleX = scaleX
             videoView.scaleY = scaleY
         }
@@ -65,26 +51,55 @@ class NoInternetActivity : AppCompatActivity() {
         videoView.setOnCompletionListener { videoView.start() }
 
         // Начинаем проверку интернета
-        handler.post(checkInternetRunnable)
+        startInternetCheck()
+        registerNetworkCallback()
+    }
+
+    private fun startInternetCheck() {
+        lifecycleScope.launch {
+            while (true) {
+                if (isNetworkAvailable()) {
+                    navigateToMainActivity()
+                    break
+                }
+                delay(2000)
+            }
+        }
+    }
+
+    private fun registerNetworkCallback() {
+        val networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread {
+                    navigateToMainActivity()
+                }
+            }
+        }
+        connectivityManager.registerDefaultNetworkCallback(networkCallback)
+    }
+
+    private fun navigateToMainActivity() {
+        val targetUrl = intent.getStringExtra("targetUrl")
+        val returnIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra("targetUrl", targetUrl)
+            putExtra("checkUpdate", true)
+        }
+        startActivity(returnIntent)
+        finish()
     }
 
     private fun isNetworkAvailable(): Boolean {
-        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val networkCapabilities = connectivityManager.activeNetwork ?: return false
-            val actNw = connectivityManager.getNetworkCapabilities(networkCapabilities) ?: return false
-            return actNw.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || actNw.hasTransport(
-                NetworkCapabilities.TRANSPORT_CELLULAR
-            ) || actNw.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
-        } else {
-            val activeNetworkInfo = connectivityManager.activeNetworkInfo
-            return activeNetworkInfo != null && activeNetworkInfo.isConnected
-        }
+        val network = connectivityManager.activeNetwork
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+        return capabilities != null && (
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                )
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        handler.removeCallbacks(checkInternetRunnable)
         videoView.stopPlayback()
         Log.d(TAG, "Экран без интернета уничтожен")
     }
