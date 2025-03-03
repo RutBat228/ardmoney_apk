@@ -5,8 +5,6 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 
-import com.rutbat.ardmoney.config.ConfigManager
-
 class ArdMoneyApp : Application(), DefaultLifecycleObserver {
 
     companion object {
@@ -16,7 +14,7 @@ class ArdMoneyApp : Application(), DefaultLifecycleObserver {
 
     override fun onCreate() {
         super<Application>.onCreate()
-        ConfigManager.init(this)
+        // ConfigManager.init(this) больше не нужен
         ProcessLifecycleOwner.get().lifecycle.addObserver(this as DefaultLifecycleObserver)
     }
 

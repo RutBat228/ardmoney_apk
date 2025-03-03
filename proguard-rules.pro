@@ -1,21 +1,33 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Сохраняем классы активностей и сервисов, чтобы Android их находил
+-keep class com.rutbat.ardmoney.core.MainActivity { *; }
+-keep class com.rutbat.ardmoney.core.UpdateInfoActivity { *; }
+-keep class com.rutbat.ardmoney.core.NoInternetActivity { *; }
+-keep class com.rutbat.ardmoney.splashscreen.SplashActivity { *; }
+-keep class com.rutbat.ardmoney.fcm.FCMService { *; }
+-keep class com.rutbat.ardmoney.ArdMoneyApp { *; }
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Сохраняем именованный внутренний класс для JavaScript-интерфейса
+-keep class com.rutbat.ardmoney.core.MainActivity$AndroidJsInterface { *; }
+-keepclassmembers class com.rutbat.ardmoney.core.MainActivity$AndroidJsInterface {
+    public *;
+}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Сохраняем атрибуты для корректной работы стека вызовов в логах
+-keepattributes SourceFile,LineNumberTable
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Обфусцируем остальные классы и члены, включая AppConfig
+-keep class com.rutbat.ardmoney.config.AppConfig {
+    public static final *;
+}
+-dontwarn com.rutbat.ardmoney.config.AppConfig
+
+# Предотвращаем удаление неиспользуемых классов, которые могут быть вызваны через рефлексию
+-keep class androidx.** { *; }
+-keep class com.google.** { *; }
+
+# Уменьшаем логирование в релизной сборке (опционально)
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+    public static *** i(...);
+}

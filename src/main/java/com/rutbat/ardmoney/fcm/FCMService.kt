@@ -14,7 +14,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.rutbat.ardmoney.R
 import com.rutbat.ardmoney.ArdMoneyApp
-import com.rutbat.ardmoney.config.ConfigManager
+import com.rutbat.ardmoney.config.AppConfig
 import com.rutbat.ardmoney.core.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,8 +33,7 @@ class FCMService : FirebaseMessagingService() {
         Log.d(TAG, "Raw message data: ${remoteMessage.data}")
 
         try {
-            val config = ConfigManager.getConfig()
-            if (!config.optBoolean("fcm_enabled", true)) {
+            if (!AppConfig.FCM_ENABLED) {
                 Log.d(TAG, "FCM disabled in config")
                 return
             }
@@ -65,7 +64,7 @@ class FCMService : FirebaseMessagingService() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Ardmoney Notifications",
-                NotificationManager.IMPORTANCE_HIGH // Заменили IMPORTANCE_BACKGROUND на IMPORTANCE_HIGH
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Уведомления в стиле Telegram"
                 enableVibration(true)
@@ -74,7 +73,6 @@ class FCMService : FirebaseMessagingService() {
             notificationManager.createNotificationChannel(channel)
         }
 
-        // Intent для открытия страницы уведомления
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("targetUrl", "https://ardmoney.ru/allert.php")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -87,7 +85,6 @@ class FCMService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Intent для действия "Прочитано" (тоже через MainActivity)
         val readIntent = Intent(this, MainActivity::class.java).apply {
             putExtra("targetUrl", "https://ardmoney.ru/allert.php")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP

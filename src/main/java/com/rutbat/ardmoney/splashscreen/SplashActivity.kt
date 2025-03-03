@@ -7,7 +7,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.rutbat.ardmoney.R
-import com.rutbat.ardmoney.config.ConfigManager
+import com.rutbat.ardmoney.config.AppConfig
 import com.rutbat.ardmoney.core.MainActivity
 
 class SplashActivity : AppCompatActivity() {
@@ -15,8 +15,8 @@ class SplashActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val config = ConfigManager.getConfig()
-        if (!config.optBoolean("splash_screen_enabled", true)) {            startMainActivity()
+        if (!AppConfig.SPLASH_SCREEN_ENABLED) {
+            startMainActivity()
             return
         }
 

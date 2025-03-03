@@ -31,7 +31,8 @@ android {
 
     buildTypes {
         getByName("release") {
-            isMinifyEnabled = false
+            isMinifyEnabled = true // Включаем обфускацию
+            isShrinkResources = true // Уменьшаем ресурсы
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -63,7 +64,7 @@ dependencies {
 
     implementation("androidx.activity:activity-ktx:1.10.1") {
         version {
-            strictly("1.10.1") // Принудительно фиксируем версию
+            strictly("1.10.1")
         }
     }
 
